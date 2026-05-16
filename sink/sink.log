@@ -1,0 +1,8 @@
+nohup: ignoring input
+
+Processing /var/www/node_application/logs/app.log
+Traceback (most recent call last):
+  File "/var/www/AI-Assisted-Distributed-Log-Monitoring-System/sink/sink.py", line 91, in <module>
+    process_file(f, args.lines, args.url, offsets, args.service, args.api-key)
+                                                                 ^^^^^^^^
+AttributeError: 'Namespace' object has no attribute 'api'
