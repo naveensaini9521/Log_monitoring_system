@@ -10,7 +10,6 @@ logger = logging.getLogger(__name__)
 
 @register_bp.route('/register', methods=['POST'])
 def register():
-    # Ensure we always return JSON, even on errors
     try:
         data = request.get_json()
         if not data:
