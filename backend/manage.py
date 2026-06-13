@@ -1,11 +1,9 @@
 import os
-import sys
 import json
 import argparse
-from datetime import datetime, timedelta
+from datetime import datetime
 from werkzeug.security import generate_password_hash
 import sqlite3
-import hashlib
 import uuid
 
 # Try to import Flask app - if not in path, we'll work with direct DB
@@ -155,7 +153,7 @@ def create_user(args):
             datetime.now().isoformat()
         ))
         conn.commit()
-        print(f"✅ User created successfully!")
+        print("✅ User created successfully!")
         print(f"   ID: {user_id}")
         print(f"   Email: {args.email}")
         print(f"   Role: {args.role}")
@@ -211,7 +209,7 @@ def create_organization(args):
             "active"
         ))
         conn.commit()
-        print(f"✅ Organization created successfully!")
+        print("✅ Organization created successfully!")
         print(f"   ID: {org_id}")
         print(f"   Name: {args.name}")
         print(f"   Domain: {args.domain}")

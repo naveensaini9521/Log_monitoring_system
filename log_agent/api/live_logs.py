@@ -1,7 +1,6 @@
 from fastapi import APIRouter
 from log_agent.db import logs
 from urllib.parse import unquote
-import asyncio
 
 router = APIRouter(prefix="/api/logs", tags=["Logs"])
 

@@ -51,7 +51,7 @@ def role_required(allowed_roles):
             if not user_role:
                 return jsonify({"success": False, "message": "Authentication required"}), 401
             if user_role not in allowed_roles:
-                return jsonify({"success": False, "message": f"Access denied"}), 403
+                return jsonify({"success": False, "message": "Access denied"}), 403
             # Pass current_user if needed
             current_user = {
                 "id": session.get('user_id'),

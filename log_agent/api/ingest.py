@@ -1,7 +1,7 @@
-import sys, os
-from fastapi import APIRouter, Header, HTTPException, Depends
+import sys
+import os
+from fastapi import APIRouter, Header, HTTPException
 from datetime import datetime
-from bson import ObjectId
 
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
 sys.path.append(BASE_DIR)

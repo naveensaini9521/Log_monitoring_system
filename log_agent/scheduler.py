@@ -9,7 +9,6 @@ import os
 
 scheduler = BackgroundScheduler(timezone="UTC")
 
-import os
 
 INGEST_API = os.getenv("INGEST_API", "http://127.0.0.1:8000/api/ingest")
 

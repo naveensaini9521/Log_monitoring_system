@@ -1,7 +1,6 @@
 from flask import Blueprint, jsonify, session
 from auth.login import login_required
 from auth.role_check import role_required
-from db import get_db
 
 org_members_bp = Blueprint('org_members', __name__)
 

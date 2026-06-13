@@ -1,5 +1,4 @@
 # backend/utils/auth.py
-from bson import ObjectId
 from db import get_db
 
 def get_user_id_from_session(session):
