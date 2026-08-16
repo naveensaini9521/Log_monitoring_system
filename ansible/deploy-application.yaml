@@ -1,0 +1,165 @@
+---
+- name: Deploy Web Log Monitoring System Application (Production ALB + Docker Backend)
+  hosts: tier_app
+  become: yes
+  gather_facts: yes
+
+  vars:
+    app_name: "log_monitoring_system"
+    app_dir: "/var/www/log_monitoring_system"
+    app_user: "ec2-user"
+    app_port: 8000
+    external_port: 80
+    repo_url: "https://github.com/naveensaini9521/Log_monitoring_system.git"
+    docker_network: "web-network"
+    app_workers: 4
+    app_entry_point: "app:app"
+    elb_dns: "log-monitoring-alb-580337238.ap-south-1.elb.amazonaws.com"
+
+  tasks:
+    - name: Display deployment info
+      debug:
+        msg: |
+          ============================================
+          Deploying: {{ app_name }}
+          Host: {{ inventory_hostname }}
+          ELB: {{ elb_dns }}
+          ============================================
+
+    - name: Ensure application directory exists
+      file:
+        path: "{{ app_dir }}"
+        state: directory
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0755"
+
+    - name: Clone latest repository
+      git:
+        repo: "{{ repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+      become_user: "{{ app_user }}"
+
+    - name: Create .env file from template
+      template:
+        src: .env.j2
+        dest: "{{ app_dir }}/.env"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Create docker-compose.yaml from template
+      template:
+        src: docker-compose.yaml.j2
+        dest: "{{ app_dir }}/docker-compose.yaml"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Create Dockerfile from template
+      template:
+        src: Dockerfile.j2
+        dest: "{{ app_dir }}/Dockerfile"
+        owner: "{{ app_user }}"
+        group: "{{ app_user }}"
+        mode: "0644"
+
+    - name: Remove default Nginx configuration
+      file:
+        path: /etc/nginx/conf.d/default.conf
+        state: absent
+      ignore_errors: yes
+
+    - name: Deploy custom Nginx configuration
+      template:
+        src: nginx.conf.j2
+        dest: /etc/nginx/nginx.conf
+        owner: root
+        group: root
+        mode: "0644"
+      notify: restart nginx
+
+    - name: Test Nginx configuration
+      command: nginx -t
+      register: nginx_test
+      changed_when: false
+      failed_when: nginx_test.rc != 0
+
+    - name: Reload Nginx to apply changes
+      systemd:
+        name: nginx
+        state: reloaded
+
+    - name: Stop existing application containers
+      shell: docker compose down || true
+      args:
+        chdir: "{{ app_dir }}"
+
+    - name: Build and start application containers
+      shell: docker compose up -d --build
+      args:
+        chdir: "{{ app_dir }}"
+      register: compose_result
+      retries: 3
+      delay: 10
+      until: compose_result.rc == 0
+
+    - name: Wait for application container port
+      wait_for:
+        port: "{{ app_port }}"
+        timeout: 120
+
+    - name: Check local application health
+      uri:
+        url: "http://127.0.0.1:{{ app_port }}/health"
+        status_code: 200
+      register: local_health
+      retries: 5
+      delay: 5
+      until: local_health.status == 200
+
+    - name: Verify application via ELB
+      uri:
+        url: "http://{{ elb_dns }}/"
+        status_code: 200
+      register: elb_health
+      retries: 5
+      delay: 10
+      until: elb_health.status == 200
+      ignore_errors: yes
+
+    - name: Show running containers
+      command: docker ps
+      register: docker_ps
+      changed_when: false
+
+    - name: Print container execution output
+      debug:
+        var: docker_ps.stdout_lines
+
+    - name: Show container logs if deployment failed
+      shell: docker compose logs --tail=50
+      args:
+        chdir: "{{ app_dir }}"
+      when: compose_result.rc != 0
+      ignore_errors: yes
+
+    - name: Deployment complete summary
+      debug:
+        msg: |
+          ============================================
+          DEPLOYMENT SUCCESSFUL
+          App: {{ app_name }}
+          Instance: {{ inventory_hostname }}
+          Routing Port: {{ external_port }} (via NGINX Proxy)
+          Target Backend Port: {{ app_port }}
+          ELB Endpoint: http://{{ elb_dns }}
+          ============================================
+
+  handlers:
+    - name: restart nginx
+      systemd:
+        name: nginx
+        state: restarted
