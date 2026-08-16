@@ -1,0 +1,202 @@
+---
+- name: Configure MongoDB Replica Set
+  hosts: role_master:role_slave
+  become: yes
+  gather_facts: yes
+  serial: "100%"
+
+  vars:
+    mongodb_admin_password: "{{ db_password }}"
+    mongodb_replica_set: "rs0"
+    mongodb_keyfile: "/etc/mongodb-keyfile"
+
+  tasks:
+    - name: Display database role
+      debug:
+        msg: |
+          Configuring {{ inventory_hostname }}
+          Role: {{ 'PRIMARY' if 'role_master' in group_names else 'SECONDARY' }}
+          Database: {{ db_name }}
+          User: {{ db_username }}
+
+    - name: Install MongoDB Server
+      block:
+        - name: Add MongoDB repository
+          copy:
+            dest: /etc/yum.repos.d/mongodb-org-6.0.repo
+            content: |
+              [mongodb-org-6.0]
+              name=MongoDB Repository
+              baseurl=https://repo.mongodb.org/yum/redhat/$releasever/mongodb-org/6.0/x86_64/
+              gpgcheck=1
+              enabled=1
+              gpgkey=https://www.mongodb.org/static/pgp/server-6.0.asc
+
+        - name: Install MongoDB packages
+          dnf:
+            name:
+              - mongodb-org
+              - mongodb-mongosh
+              - python3-pymongo
+            state: present
+            update_cache: yes
+
+    - name: Create MongoDB keyfile for replica set authentication
+      copy:
+        dest: "{{ mongodb_keyfile }}"
+        content: "{{ lookup('password', '/dev/null chars=ascii_letters,digits length=756') }}"
+        owner: mongod
+        group: mongod
+        mode: "0400"
+      when: inventory_hostname == groups['role_master'][0]
+
+    - name: Distribute keyfile to all nodes
+      fetch:
+        src: "{{ mongodb_keyfile }}"
+        dest: /tmp/mongodb-keyfile
+        flat: yes
+      when: inventory_hostname == groups['role_master'][0]
+      run_once: yes
+
+    - name: Copy keyfile to all nodes
+      copy:
+        src: /tmp/mongodb-keyfile
+        dest: "{{ mongodb_keyfile }}"
+        owner: mongod
+        group: mongod
+        mode: "0400"
+      when: inventory_hostname != groups['role_master'][0]
+
+    - name: Configure MongoDB
+      template:
+        src: mongod.conf.j2
+        dest: /etc/mongod.conf
+        owner: mongod
+        group: mongod
+        mode: "0644"
+      vars:
+        mongodb_ip: "{{ ansible_default_ipv4.address }}"
+        mongodb_repl_set: "{{ mongodb_replica_set }}"
+        mongodb_keyfile: "{{ mongodb_keyfile }}"
+      notify: restart mongodb
+
+    - name: Start MongoDB
+      systemd:
+        name: mongod
+        state: started
+        enabled: yes
+
+    - name: Wait for MongoDB to start
+      wait_for:
+        port: 27017
+        timeout: 120
+
+    # PRIMARY (MASTER) BLOCK
+    - name: Configure Primary Node
+      block:
+        - name: Create admin user
+          mongosh:
+            login_user: "{{ mongodb_admin_user | default('admin') }}"
+            login_password: "{{ mongodb_admin_password }}"
+            login_database: admin
+            command: |
+              db.createUser({
+                user: "{{ mongodb_admin_user | default('admin') }}",
+                pwd: "{{ mongodb_admin_password }}",
+                roles: [{ role: "root", db: "admin" }]
+              })
+          when: mongodb_admin_user is defined
+          ignore_errors: yes
+
+        - name: Initialize replica set
+          mongosh:
+            login_user: "{{ mongodb_admin_user | default('admin') }}"
+            login_password: "{{ mongodb_admin_password }}"
+            login_database: admin
+            command: |
+              rs.initiate({
+                _id: "{{ mongodb_replica_set }}",
+                members: [
+                  {% for host in groups['all'] %}
+                  {
+                    _id: {{ loop.index0 }},
+                    host: "{{ hostvars[host].ansible_default_ipv4.address }}:27017",
+                    priority: {{ 2 if 'role_master' in hostvars[host].group_names else 1 }}
+                  }{% if not loop.last %},{% endif %}
+                  {% endfor %}
+                ]
+              })
+          register: initiate_output
+          ignore_errors: yes
+
+        - name: Wait for replica set initiation
+          pause:
+            seconds: 10
+
+        - name: Create application database and user
+          mongosh:
+            login_user: "{{ mongodb_admin_user | default('admin') }}"
+            login_password: "{{ mongodb_admin_password }}"
+            login_database: admin
+            command: |
+              use {{ db_name }}
+              db.createUser({
+                user: "{{ db_username }}",
+                pwd: "{{ db_password }}",
+                roles: [{ role: "readWrite", db: "{{ db_name }}" }]
+              })
+
+        - name: Display replica set status
+          mongosh:
+            login_user: "{{ mongodb_admin_user | default('admin') }}"
+            login_password: "{{ mongodb_admin_password }}"
+            login_database: admin
+            command: "rs.status()"
+          register: replica_status
+
+        - name: Output replica set status
+          debug:
+            var: replica_status.stdout_lines
+
+      when: "'role_master' in group_names"
+
+    # SECONDARY (SLAVE) BLOCK
+    - name: Configure Secondary Nodes
+      block:
+        - name: Wait for primary to be available
+          wait_for:
+            host: "{{ hostvars[groups['role_master'][0]].ansible_default_ipv4.address }}"
+            port: 27017
+            timeout: 120
+
+        - name: Add secondary to replica set
+          mongosh:
+            login_user: "{{ mongodb_admin_user | default('admin') }}"
+            login_password: "{{ mongodb_admin_password }}"
+            login_database: admin
+            host: "{{ hostvars[groups['role_master'][0]].ansible_default_ipv4.address }}:27017"
+            command: |
+              rs.add("{{ ansible_default_ipv4.address }}:27017")
+
+      when: "'role_slave' in group_names"
+      ignore_errors: yes
+
+    # FOOTER COMPLETION
+    - name: Database configuration complete
+      debug:
+        msg: |
+          ============================================
+          DATABASE CONFIGURATION COMPLETE
+          ============================================
+          Host: {{ inventory_hostname }}
+          Role: {{ 'PRIMARY' if 'role_master' in group_names else 'SECONDARY' }}
+          Database: {{ db_name }}
+          User: {{ db_username }}
+          Replica Set: {{ mongodb_replica_set }}
+          ============================================
+
+  handlers:
+    - name: restart mongodb
+      systemd:
+        name: mongod
+        state: restarted
