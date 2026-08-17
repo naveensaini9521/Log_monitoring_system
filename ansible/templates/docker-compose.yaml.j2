@@ -1,0 +1,25 @@
+services:
+  web:
+    build: .
+    container_name: {{ app_name }}-app
+    restart: unless-stopped
+    ports:
+      - "{{ app_port }}:{{ app_port }}"
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+      - ./static:/app/static
+      - ./media:/app/media
+    networks:
+      - {{ docker_network }}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:{{ app_port }}/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  {{ docker_network }}:
+    driver: bridge

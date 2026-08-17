@@ -1,0 +1,28 @@
+[Unit]
+Description=Logs Monitoring System Flask Application
+After=network.target
+
+[Service]
+User={{ app_user }}
+Group={{ app_user }}
+WorkingDirectory={{ app_dir }}
+Environment="PATH={{ venv_dir }}/bin"
+Environment="PYTHONPATH={{ app_dir }}"
+EnvironmentFile={{ app_dir }}/.env
+ExecStart={{ venv_dir }}/bin/gunicorn \
+    --workers 4 \
+    --threads 2 \
+    --worker-class gthread \
+    --bind 8000:8000 \
+    --access-logfile /var/log/{{ app_name }}/access.log \
+    --error-logfile /var/log/{{ app_name }}/error.log \
+    --capture-output \
+    app:app
+Restart=always
+RestartSec=10
+StandardOutput=syslog
+StandardError=syslog
+SyslogIdentifier={{ app_name }}
+
+[Install]
+WantedBy=multi-user.target
